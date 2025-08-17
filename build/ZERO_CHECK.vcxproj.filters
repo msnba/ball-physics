@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\Alexn\Documents\Programming\C++\ball-physics\build\CMakeFiles\2e935692bde1fd8178e8fe09d77d5cda\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{258EF47C-DC98-3DE4-A1A5-D0E2DCEDCA7A}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
