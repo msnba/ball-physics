@@ -1,7 +1,8 @@
 {
   "dependencies": [
+    "glew",
     "glfw3",
     "glm",
-    "glew"
+    "glad"
   ]
 }

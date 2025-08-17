@@ -4,6 +4,7 @@ project(BallPhysics VERSION 0.1.0 LANGUAGES C CXX)
 find_package(GLEW REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
+find_package(glad CONFIG REQUIRED)
 
 set(REQUIRED_FILES
     main.cpp
@@ -13,6 +14,7 @@ set(DEPENDENCIES
     GLEW::GLEW
     glfw
     glm::glm
+    glad::glad
 )
 
 add_executable(BallPhysics ${REQUIRED_FILES})
