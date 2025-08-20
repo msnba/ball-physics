@@ -1,7 +1,5 @@
 # ball-physics
 
----
-
 _An OpenGL physics simulation._
 What I plan to do in this project:
 
