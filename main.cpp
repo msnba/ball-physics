@@ -52,14 +52,11 @@ public:
     size_t vertCount;
 
     float radius;
-    float damping; // gravity damping
 
     Ball(glm::vec3 position, glm::vec3 velocity, float radius) : position(position), velocity(velocity), radius(radius)
     {
         std::vector<float> vertices = GenerateCirc();
         vertCount = vertices.size() / 3;
-
-        damping = .8f; // energy loss
 
         CreateVV(VAO, VBO, vertices.data(), vertices.size()); // creates a VAO and VBO for each specific ball
     }
@@ -107,42 +104,68 @@ public:
         this->velocity[0] += x;
         this->velocity[1] += y;
     }
-    float CheckForCollision(Ball &otherBall) // kinda jittery but will fix later
+    void CheckForCollision(Ball &otherBall) // kinda jittery but will fix later
     {
-        const float epsilon = 0.0001f;
+        const float damping = 1.0f;   // energy loss
+        const float stiffness = 0.0f; // 0.0f means normal bounce, 1.0f means stop as soon as it hits the ground
 
-        // Left wall
-        if (position.x - radius < -1.0f && velocity.x < 0.0f)
+        // left
+        float overlapLeft = (-1.0f + radius) - position.x;
+        if (overlapLeft > 0.0f)
         {
-            position.x = -1.0f + radius + epsilon;
-            velocity.x = -damping * velocity.x;
-        }
-        // Right wall
-        else if (position.x + radius > 1.0f && velocity.x > 0.0f)
-        {
-            position.x = 1.0f - radius - epsilon;
-            velocity.x = -damping * velocity.x;
-        }
+            velocity.x += calcCorrectionImpulse(overlapLeft, stiffness, damping);
 
-        // Bottom wall
-        if (position.y - radius < -1.0f && velocity.y < 0.0f)
-        {
-            position.y = -1.0f + radius + epsilon;
-            velocity.y = -damping * velocity.y;
-        }
-        // Top wall
-        else if (position.y + radius > 1.0f && velocity.y > 0.0f)
-        {
-            position.y = 1.0f - radius - epsilon;
-            velocity.y = -damping * velocity.y;
+            if (velocity.x < 0.0f)
+            {
+                velocity.x = -velocity.x * damping;
+            }
         }
 
-        return 0.0f;
+        // right
+        float overlapRight = (position.x + radius) - 1.0f;
+        if (overlapRight > 0.0f)
+        {
+            velocity.x -= calcCorrectionImpulse(overlapRight, stiffness, damping);
+            if (velocity.x > 0.0f)
+            {
+                velocity.x = -velocity.x * damping;
+            }
+        }
+
+        // bottom
+        float overlapBottom = (-1.0f + radius) - position.y;
+        if (overlapBottom > 0.0f)
+        {
+            velocity.y += calcCorrectionImpulse(overlapBottom, stiffness, damping);
+
+            if (velocity.y < 0.0f)
+            {
+                velocity.y = -velocity.y * damping;
+            }
+        }
+
+        // top
+        float overlapTop = (position.y + radius) - 1.0f;
+        if (overlapTop > 0.0f)
+        {
+            velocity.y -= calcCorrectionImpulse(overlapTop, stiffness, damping);
+
+            if (velocity.y > 0.0f)
+            {
+                velocity.y = -velocity.y * damping;
+            }
+        }
     }
 
     glm::vec3 GetPos() const
     {
         return this->position;
+    }
+
+private:
+    float calcCorrectionImpulse(float overlap, float stiffness, float damping)
+    {
+        return -(1.0f / deltaTime) * overlap * stiffness - velocity.x * damping; // spring-damper system
     }
 };
 
@@ -187,16 +210,11 @@ int main()
     glEnable(GL_DEPTH_TEST);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback); // registering function to call every window resize
 
-    // balls = {
-    //     Ball(glm::vec3(-0.25f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 1.0f, 0.05f, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f)),
-    //     Ball(glm::vec3(0.25f, 0.5f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 1.0f, 0.05f, glm::vec4(0.0f, 1.0f, 0.0f, 1.0f)),
-    //     Ball(glm::vec3(-0.25f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 1.0f, 0.05f, glm::vec4(0.0f, 0.0f, 1.0f, 1.0f))};
-
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(0.0, 1.0);
 
-    for (int i = 0; i < 20; i++)
+    for (int i = 0; i < 10; i++)
     {
         balls.push_back(Ball(glm::vec3(dis(gen) * 0.5f, dis(gen) * 0.5f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), ((float)dis(gen) + 0.4f) * 0.1f, glm::vec4(dis(gen), dis(gen), dis(gen), 1.0f)));
     }
@@ -222,10 +240,7 @@ int main()
 
             // logic down here
 
-            if (abs(ball.velocity.x) < 0.05f) // wow great grav flip mechanism
-                flip *= -1;
-
-            ball.accel(flip * 9.8f * deltaTime, flip * 9.8f * deltaTime);
+            ball.accel(0.0f, flip * 9.8f * deltaTime);
             for (auto &ball2 : balls)
             {
                 if (&ball2 != &ball)
