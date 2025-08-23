@@ -9,6 +9,7 @@
 
 #include <iostream>
 #include <vector>
+#include <random>
 
 const int WIDTH = 800;
 const int HEIGHT = 600;
@@ -50,21 +51,20 @@ public:
     glm::vec4 color = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
     size_t vertCount;
 
-    float mass; // used for later calculations
     float radius;
+    float damping; // gravity damping
 
-    int test; // testing number
-
-    Ball(int test, glm::vec3 position, glm::vec3 velocity, float mass, float radius) : position(position), velocity(velocity), mass(mass), radius(radius), test(test)
+    Ball(glm::vec3 position, glm::vec3 velocity, float radius) : position(position), velocity(velocity), radius(radius)
     {
-
         std::vector<float> vertices = GenerateCirc();
         vertCount = vertices.size() / 3;
+
+        damping = .8f; // energy loss
 
         CreateVV(VAO, VBO, vertices.data(), vertices.size()); // creates a VAO and VBO for each specific ball
     }
 
-    Ball(int test, glm::vec3 position, glm::vec3 velocity, float mass, float radius, glm::vec4 color) : Ball(test, position, velocity, mass, radius)
+    Ball(glm::vec3 position, glm::vec3 velocity, float radius, glm::vec4 color) : Ball(position, velocity, radius)
     {
         this->color = color;
     }
@@ -75,7 +75,7 @@ public:
 
         vertices.insert(vertices.end(), {0.0f, 0.0f, 0.0f});
 
-        int quality = 100;
+        int quality = 70;
 
         for (int i = 0; i <= quality; i++)
         {
@@ -104,16 +104,40 @@ public:
     }
     void accel(float x, float y)
     {
-        if (test == 0)
+        this->velocity[0] += x;
+        this->velocity[1] += y;
+    }
+    float CheckForCollision(Ball &otherBall) // kinda jittery but will fix later
+    {
+        const float epsilon = 0.0001f;
+
+        // Left wall
+        if (position.x - radius < -1.0f && velocity.x < 0.0f)
         {
-            this->velocity[0] += x;
-            this->velocity[1] += y;
+            position.x = -1.0f + radius + epsilon;
+            velocity.x = -damping * velocity.x;
         }
-        else if (test == 1)
+        // Right wall
+        else if (position.x + radius > 1.0f && velocity.x > 0.0f)
         {
-            this->velocity[0] -= x;
-            this->velocity[1] -= y;
+            position.x = 1.0f - radius - epsilon;
+            velocity.x = -damping * velocity.x;
         }
+
+        // Bottom wall
+        if (position.y - radius < -1.0f && velocity.y < 0.0f)
+        {
+            position.y = -1.0f + radius + epsilon;
+            velocity.y = -damping * velocity.y;
+        }
+        // Top wall
+        else if (position.y + radius > 1.0f && velocity.y > 0.0f)
+        {
+            position.y = 1.0f - radius - epsilon;
+            velocity.y = -damping * velocity.y;
+        }
+
+        return 0.0f;
     }
 
     glm::vec3 GetPos() const
@@ -158,13 +182,27 @@ int main()
     }
 
     GLuint shaderProgram = CreateShaderP(vertexShaderSource, fragmentShaderSource);
+    int colorLoc = glGetUniformLocation(shaderProgram, "color");
 
     glEnable(GL_DEPTH_TEST);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback); // registering function to call every window resize
 
-    balls = {
-        Ball(0, glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 1.0f, 0.2f, glm::vec4(1.0f, 0.5f, 0.5f, 1.0f)),
-        Ball(1, glm::vec3(0.0f, 0.5f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 1.0f, 0.2f, glm::vec4(1.0f, 1.0f, 1.0f, 1.0f))};
+    // balls = {
+    //     Ball(glm::vec3(-0.25f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 1.0f, 0.05f, glm::vec4(1.0f, 0.0f, 0.0f, 1.0f)),
+    //     Ball(glm::vec3(0.25f, 0.5f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 1.0f, 0.05f, glm::vec4(0.0f, 1.0f, 0.0f, 1.0f)),
+    //     Ball(glm::vec3(-0.25f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 1.0f, 0.05f, glm::vec4(0.0f, 0.0f, 1.0f, 1.0f))};
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> dis(0.0, 1.0);
+
+    for (int i = 0; i < 20; i++)
+    {
+        balls.push_back(Ball(glm::vec3(dis(gen) * 0.5f, dis(gen) * 0.5f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), ((float)dis(gen) + 0.4f) * 0.1f, glm::vec4(dis(gen), dis(gen), dis(gen), 1.0f)));
+    }
+
+    float aspect = (float)WIDTH / (float)HEIGHT;
+    int flip = -1;
 
     while (!glfwWindowShouldClose(window)) // main render loop
     {
@@ -180,21 +218,31 @@ int main()
 
         for (auto &ball : balls)
         {
-            ball.UpdateVerts();
+            // ball.UpdateVerts();
+
+            // logic down here
+
+            if (abs(ball.velocity.x) < 0.05f) // wow great grav flip mechanism
+                flip *= -1;
+
+            ball.accel(flip * 9.8f * deltaTime, flip * 9.8f * deltaTime);
+            for (auto &ball2 : balls)
+            {
+                if (&ball2 != &ball)
+                {
+                    ball.CheckForCollision(ball2);
+                }
+            }
+
             ball.UpdatePos();
 
-            ball.accel(sin(deltaTime) * 0.01f, sin(deltaTime) * 0.01f);
-
-            float aspect = (float)WIDTH / (float)HEIGHT;
             glm::mat4 trans = glm::translate(glm::mat4(1.0f), ball.position);
             trans = glm::scale(trans, glm::vec3(1.0f / aspect, 1.0f, 1.0f));
             glUniformMatrix4fv(transformLoc, 1, GL_FALSE, glm::value_ptr(trans));
-
-            int colorLoc = glGetUniformLocation(shaderProgram, "color");
             glUniform4fv(colorLoc, 1, glm::value_ptr(ball.color));
 
             glBindVertexArray(ball.VAO);
-            glDrawArrays(GL_TRIANGLE_FAN, 0, static_cast<GLsizei>(ball.vertCount));
+            glDrawArrays(GL_TRIANGLE_FAN, 0, ball.vertCount);
         }
 
         glfwSwapBuffers(window); // swap frame buffers every refresh, using double buffering
