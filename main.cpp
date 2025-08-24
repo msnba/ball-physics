@@ -52,11 +52,14 @@ public:
     size_t vertCount;
 
     float radius;
+    float mass;
 
     Ball(glm::vec3 position, glm::vec3 velocity, float radius) : position(position), velocity(velocity), radius(radius)
     {
         std::vector<float> vertices = GenerateCirc();
         vertCount = vertices.size() / 3;
+
+        mass = 1.0f;
 
         CreateVV(VAO, VBO, vertices.data(), vertices.size()); // creates a VAO and VBO for each specific ball
     }
@@ -104,13 +107,43 @@ public:
         this->velocity[0] += x;
         this->velocity[1] += y;
     }
-    void CheckForCollision(Ball &otherBall) // kinda jittery but will fix later
+    void CheckWallCollision()
     {
-        const float damping = 1.0f;   // energy loss
+        const float damping = 0.7f;   // energy loss
         const float stiffness = 0.0f; // 0.0f means normal bounce, 1.0f means stop as soon as it hits the ground
 
-        // left
-        float overlapLeft = (-1.0f + radius) - position.x;
+        // check for wall clipping
+        if (position.x - radius < -1.0f)
+        {
+            position.x = -1.0f + radius;
+            if (velocity.x < 0.0f)
+                velocity.x = -velocity.x * damping;
+            return;
+        }
+        if (position.x + radius > 1.0f)
+        {
+            position.x = 1.0f - radius;
+            if (velocity.x > 0.0f)
+                velocity.x = -velocity.x * damping;
+            return;
+        }
+        if (position.y - radius < -1.0f)
+        {
+            position.y = -1.0f + radius;
+            if (velocity.y < 0.0f)
+                velocity.y = -velocity.y * damping;
+            return;
+        }
+        if (position.y + radius > 1.0f)
+        {
+            position.y = 1.0f - radius;
+            if (velocity.y > 0.0f)
+                velocity.y = -velocity.y * damping;
+            return;
+        }
+
+        // collision
+        float overlapLeft = (-mass + radius) - position.x;
         if (overlapLeft > 0.0f)
         {
             velocity.x += calcCorrectionImpulse(overlapLeft, stiffness, damping);
@@ -120,9 +153,7 @@ public:
                 velocity.x = -velocity.x * damping;
             }
         }
-
-        // right
-        float overlapRight = (position.x + radius) - 1.0f;
+        float overlapRight = (position.x + radius) - mass;
         if (overlapRight > 0.0f)
         {
             velocity.x -= calcCorrectionImpulse(overlapRight, stiffness, damping);
@@ -132,8 +163,7 @@ public:
             }
         }
 
-        // bottom
-        float overlapBottom = (-1.0f + radius) - position.y;
+        float overlapBottom = (-mass + radius) - position.y;
         if (overlapBottom > 0.0f)
         {
             velocity.y += calcCorrectionImpulse(overlapBottom, stiffness, damping);
@@ -144,8 +174,7 @@ public:
             }
         }
 
-        // top
-        float overlapTop = (position.y + radius) - 1.0f;
+        float overlapTop = (position.y + radius) - mass;
         if (overlapTop > 0.0f)
         {
             velocity.y -= calcCorrectionImpulse(overlapTop, stiffness, damping);
@@ -155,6 +184,63 @@ public:
                 velocity.y = -velocity.y * damping;
             }
         }
+    }
+    void CheckBallCollision(Ball &otherBall)
+    {
+        const float damping = .8f;
+        const float aspect = (float)WIDTH / (float)HEIGHT;
+
+        // -- BALL-TO-BALL COLLISIONS --
+        if (this == &otherBall) // check mismatch
+            return;
+
+        const float thisRadiusX = this->radius / aspect;
+        const float otherRadiusX = otherBall.radius / aspect;
+
+        glm::vec3 collision = this->position - otherBall.position;
+        float distance = glm::length(collision);
+
+        if (distance == 0.0f)
+        { // avoid div by 0
+            collision = glm::vec3(1.0f, 0.0f, 0.0f);
+            distance = 1.0f;
+        }
+
+        float collisionDistance; // collision distance based on visual radii
+        if (abs(collision.x) > abs(collision.y))
+        {
+            collisionDistance = thisRadiusX + otherRadiusX;
+        }
+        else
+        {
+            collisionDistance = this->radius + otherBall.radius;
+        }
+
+        if (distance >= collisionDistance) // check for collision
+            return;
+
+        float overlap = collisionDistance - distance;
+        collision = collision / distance; // collision vector normalization
+
+        float seperation = overlap * 0.5f;
+        this->position += collision * seperation;
+        otherBall.position -= collision * seperation;
+
+        float aci = glm::dot(this->velocity, collision); // initial velocity before collision
+        float bci = glm::dot(otherBall.velocity, collision);
+
+        float acf = (aci + bci - damping * (aci - bci)) * 0.5f; // solve using 1-dim elastic collision equations
+        float bcf = (aci + bci + damping * (aci - bci)) * 0.5f; // assumming equal masses
+
+        this->velocity += (acf - aci) * collision; // easier than using accel
+        otherBall.velocity += (bcf - bci) * collision;
+    }
+
+    void ApplyResistance() // super simple air resistance, feels like the balls are on ice if this isnt applied
+    {
+        const float drag = 1.0f;
+
+        this->velocity *= (1.0f - drag * deltaTime);
     }
 
     glm::vec3 GetPos() const
@@ -166,6 +252,9 @@ private:
     float calcCorrectionImpulse(float overlap, float stiffness, float damping)
     {
         return -(1.0f / deltaTime) * overlap * stiffness - velocity.x * damping; // spring-damper system
+        // this only works with velocity.x i have tried velocity.y it DOES NOT WORK
+        // it simplifies to -velocity.x * damping so i don't know whats up
+        // it is now a feature
     }
 };
 
@@ -214,19 +303,20 @@ int main()
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(0.0, 1.0);
 
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < 30; i++)
     {
-        balls.push_back(Ball(glm::vec3(dis(gen) * 0.5f, dis(gen) * 0.5f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), ((float)dis(gen) + 0.4f) * 0.1f, glm::vec4(dis(gen), dis(gen), dis(gen), 1.0f)));
+        balls.push_back(Ball(glm::vec3(dis(gen) * 0.5f, dis(gen) * 0.5f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 0.1f, glm::vec4(dis(gen), dis(gen), dis(gen), 1.0f)));
     }
 
     float aspect = (float)WIDTH / (float)HEIGHT;
-    int flip = -1;
 
     while (!glfwWindowShouldClose(window)) // main render loop
     {
         float currentFrame = (float)glfwGetTime();
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
+        if (deltaTime > 0.016f)
+            deltaTime = 0.016f;
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -236,19 +326,22 @@ int main()
 
         for (auto &ball : balls)
         {
-            // ball.UpdateVerts();
+            ball.accel(0.0f, -9.8f * deltaTime);
+            ball.ApplyResistance();
+            ball.CheckWallCollision();
+        }
 
-            // logic down here
-
-            ball.accel(0.0f, flip * 9.8f * deltaTime);
-            for (auto &ball2 : balls)
+        for (size_t i = 0; i < balls.size(); i++)
+        {
+            for (size_t j = i + 1; j < balls.size(); j++)
             {
-                if (&ball2 != &ball)
-                {
-                    ball.CheckForCollision(ball2);
-                }
+                balls[i].CheckBallCollision(balls[j]);
             }
+        }
 
+        for (auto &ball : balls)
+        {
+            // ball.UpdateVerts();
             ball.UpdatePos();
 
             glm::mat4 trans = glm::translate(glm::mat4(1.0f), ball.position);
@@ -257,7 +350,7 @@ int main()
             glUniform4fv(colorLoc, 1, glm::value_ptr(ball.color));
 
             glBindVertexArray(ball.VAO);
-            glDrawArrays(GL_TRIANGLE_FAN, 0, ball.vertCount);
+            glDrawArrays(GL_TRIANGLE_FAN, 0, ball.vertCount); // using triangle fan method of circle drawing
         }
 
         glfwSwapBuffers(window); // swap frame buffers every refresh, using double buffering
@@ -277,7 +370,7 @@ int main()
 
 GLuint CreateShaderP(const char *vertexSource, const char *fragmentSource)
 {
-    GLuint vShader = glCreateShader(GL_VERTEX_SHADER);
+    GLuint vShader = glCreateShader(GL_VERTEX_SHADER); // vertex shader
     glShaderSource(vShader, 1, &vertexSource, nullptr);
     glCompileShader(vShader);
 
@@ -290,7 +383,7 @@ GLuint CreateShaderP(const char *vertexSource, const char *fragmentSource)
         std::cerr << "V Shader compilation failed: " << infoLog << std::endl;
     }
 
-    GLuint fShader = glCreateShader(GL_FRAGMENT_SHADER);
+    GLuint fShader = glCreateShader(GL_FRAGMENT_SHADER); // fragment shader
     glShaderSource(fShader, 1, &fragmentSource, nullptr);
     glCompileShader(fShader);
 
@@ -302,7 +395,7 @@ GLuint CreateShaderP(const char *vertexSource, const char *fragmentSource)
         std::cerr << "F Shader compilation failed: " << infoLog << std::endl;
     }
 
-    GLuint shaderProgram = glCreateProgram();
+    GLuint shaderProgram = glCreateProgram(); // creating shader program
     glAttachShader(shaderProgram, vShader);
     glAttachShader(shaderProgram, fShader);
     glLinkProgram(shaderProgram);
@@ -314,8 +407,6 @@ GLuint CreateShaderP(const char *vertexSource, const char *fragmentSource)
         glGetProgramInfoLog(shaderProgram, 512, nullptr, infoLog);
         std::cerr << "Shader link failed: " << infoLog << std::endl;
     }
-
-    int colorLoc = glGetUniformLocation(shaderProgram, "color");
 
     glDeleteShader(vShader);
     glDeleteShader(fShader);
