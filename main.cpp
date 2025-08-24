@@ -13,6 +13,7 @@
 
 const int WIDTH = 800;
 const int HEIGHT = 600;
+const float ASPECT = (float)WIDTH / (float)HEIGHT;
 
 const char *vertexShaderSource = R"glsl(#version 330 core
 layout (location = 0) in vec3 aPos;
@@ -53,6 +54,7 @@ public:
 
     float radius;
     float mass;
+    float damping;
 
     Ball(glm::vec3 position, glm::vec3 velocity, float radius) : position(position), velocity(velocity), radius(radius)
     {
@@ -60,6 +62,7 @@ public:
         vertCount = vertices.size() / 3;
 
         mass = 1.0f;
+        damping = 0.7f;
 
         CreateVV(VAO, VBO, vertices.data(), vertices.size()); // creates a VAO and VBO for each specific ball
     }
@@ -109,136 +112,74 @@ public:
     }
     void CheckWallCollision()
     {
-        const float damping = 0.7f;   // energy loss
-        const float stiffness = 0.0f; // 0.0f means normal bounce, 1.0f means stop as soon as it hits the ground
+        const float radiusX = radius / ASPECT;
 
-        // check for wall clipping
-        if (position.x - radius < -1.0f)
+        // check for wall clipping and apply transformations
+        if (position.x - radiusX < -1.0f) // LEFT
         {
-            position.x = -1.0f + radius;
-            if (velocity.x < 0.0f)
-                velocity.x = -velocity.x * damping;
-            return;
+            position.x = -1.0f + radiusX;
+            velocity.x = -velocity.x * damping;
         }
-        if (position.x + radius > 1.0f)
+        if (position.x + radiusX > 1.0f) // RIGHT
         {
-            position.x = 1.0f - radius;
-            if (velocity.x > 0.0f)
-                velocity.x = -velocity.x * damping;
-            return;
+            position.x = 1.0f - radiusX;
+            velocity.x = -velocity.x * damping;
         }
-        if (position.y - radius < -1.0f)
+        if (position.y - radius < -1.0f) // BOTTOM
         {
             position.y = -1.0f + radius;
-            if (velocity.y < 0.0f)
-                velocity.y = -velocity.y * damping;
-            return;
+            velocity.y = -velocity.y * damping;
         }
-        if (position.y + radius > 1.0f)
+        if (position.y + radius > 1.0f) // TOP
         {
             position.y = 1.0f - radius;
-            if (velocity.y > 0.0f)
-                velocity.y = -velocity.y * damping;
-            return;
-        }
-
-        // collision
-        float overlapLeft = (-mass + radius) - position.x;
-        if (overlapLeft > 0.0f)
-        {
-            velocity.x += calcCorrectionImpulse(overlapLeft, stiffness, damping);
-
-            if (velocity.x < 0.0f)
-            {
-                velocity.x = -velocity.x * damping;
-            }
-        }
-        float overlapRight = (position.x + radius) - mass;
-        if (overlapRight > 0.0f)
-        {
-            velocity.x -= calcCorrectionImpulse(overlapRight, stiffness, damping);
-            if (velocity.x > 0.0f)
-            {
-                velocity.x = -velocity.x * damping;
-            }
-        }
-
-        float overlapBottom = (-mass + radius) - position.y;
-        if (overlapBottom > 0.0f)
-        {
-            velocity.y += calcCorrectionImpulse(overlapBottom, stiffness, damping);
-
-            if (velocity.y < 0.0f)
-            {
-                velocity.y = -velocity.y * damping;
-            }
-        }
-
-        float overlapTop = (position.y + radius) - mass;
-        if (overlapTop > 0.0f)
-        {
-            velocity.y -= calcCorrectionImpulse(overlapTop, stiffness, damping);
-
-            if (velocity.y > 0.0f)
-            {
-                velocity.y = -velocity.y * damping;
-            }
+            velocity.y = -velocity.y * damping;
         }
     }
     void CheckBallCollision(Ball &otherBall)
     {
-        const float damping = .8f;
-        const float aspect = (float)WIDTH / (float)HEIGHT;
 
-        // -- BALL-TO-BALL COLLISIONS --
         if (this == &otherBall) // check mismatch
             return;
 
-        const float thisRadiusX = this->radius / aspect;
-        const float otherRadiusX = otherBall.radius / aspect;
+        glm::vec2 aPos = glm::vec2(this->position.x * ASPECT, this->position.y);
+        glm::vec2 bPos = glm::vec2(otherBall.position.x * ASPECT, otherBall.position.y);
 
-        glm::vec3 collision = this->position - otherBall.position;
-        float distance = glm::length(collision);
+        glm::vec2 delta = aPos - bPos;
+        float distance = glm::length(delta);
 
         if (distance == 0.0f)
         { // avoid div by 0
-            collision = glm::vec3(1.0f, 0.0f, 0.0f);
+            delta = glm::vec2(1.0f, 0.0f);
             distance = 1.0f;
         }
 
-        float collisionDistance; // collision distance based on visual radii
-        if (abs(collision.x) > abs(collision.y))
-        {
-            collisionDistance = thisRadiusX + otherRadiusX;
-        }
-        else
-        {
-            collisionDistance = this->radius + otherBall.radius;
-        }
-
-        if (distance >= collisionDistance) // check for collision
+        if (distance >= this->radius + otherBall.radius) // if they arent colliding
             return;
 
-        float overlap = collisionDistance - distance;
-        collision = collision / distance; // collision vector normalization
-
+        glm::vec2 normal = delta / distance; // collision normal vector
+        float overlap = this->radius + otherBall.radius - distance;
         float seperation = overlap * 0.5f;
-        this->position += collision * seperation;
-        otherBall.position -= collision * seperation;
 
-        float aci = glm::dot(this->velocity, collision); // initial velocity before collision
-        float bci = glm::dot(otherBall.velocity, collision);
+        this->position += glm::vec3(normal.x / ASPECT, normal.y, 0.0f) * seperation;
+        otherBall.position -= glm::vec3(normal.x / ASPECT, normal.y, 0.0f) * seperation;
 
-        float acf = (aci + bci - damping * (aci - bci)) * 0.5f; // solve using 1-dim elastic collision equations
-        float bcf = (aci + bci + damping * (aci - bci)) * 0.5f; // assumming equal masses
+        float va = glm::dot(glm::vec2(this->velocity.x * ASPECT, this->velocity.y), normal);         // initial velocity before collision
+        float vb = glm::dot(glm::vec2(otherBall.velocity.x * ASPECT, otherBall.velocity.y), normal); // va = velocity a
 
-        this->velocity += (acf - aci) * collision; // easier than using accel
-        otherBall.velocity += (bcf - bci) * collision;
+        float va_f = (va + vb - damping * (va - vb)) * 0.5f; // solve using 1-dim elastic collision equations
+        float vb_f = (va + vb + damping * (va - vb)) * 0.5f; // assumming equal masses, va_f = velocity a final
+
+        glm::vec2 impulseA = (va_f - va) * normal; // change in momentum caused by collision
+        glm::vec2 impulseB = (vb_f - vb) * normal; // corrects velocities along collision normal
+
+        this->velocity += glm::vec3(impulseA.x / ASPECT, impulseA.y, 0.0f);
+        otherBall.velocity += glm::vec3(impulseB.x / ASPECT, impulseB.y, 0.0f);
     }
 
     void ApplyResistance() // super simple air resistance, feels like the balls are on ice if this isnt applied
     {
-        const float drag = 1.0f;
+        const float drag = 2.0f;
 
         this->velocity *= (1.0f - drag * deltaTime);
     }
@@ -305,10 +246,8 @@ int main()
 
     for (int i = 0; i < 30; i++)
     {
-        balls.push_back(Ball(glm::vec3(dis(gen) * 0.5f, dis(gen) * 0.5f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 0.1f, glm::vec4(dis(gen), dis(gen), dis(gen), 1.0f)));
+        balls.push_back(Ball(glm::vec3(dis(gen) * 0.1f, dis(gen) * 0.1f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 0.1f, glm::vec4(dis(gen), dis(gen), dis(gen), 1.0f)));
     }
-
-    float aspect = (float)WIDTH / (float)HEIGHT;
 
     while (!glfwWindowShouldClose(window)) // main render loop
     {
@@ -345,7 +284,7 @@ int main()
             ball.UpdatePos();
 
             glm::mat4 trans = glm::translate(glm::mat4(1.0f), ball.position);
-            trans = glm::scale(trans, glm::vec3(1.0f / aspect, 1.0f, 1.0f));
+            trans = glm::scale(trans, glm::vec3(1.0f / ASPECT, 1.0f, 1.0f));
             glUniformMatrix4fv(transformLoc, 1, GL_FALSE, glm::value_ptr(trans));
             glUniform4fv(colorLoc, 1, glm::value_ptr(ball.color));
 
