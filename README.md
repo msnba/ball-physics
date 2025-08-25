@@ -23,7 +23,7 @@ What I plan to do in this project:
    - `git clone https://github.com/msnba/ball-physics.git`
 2. CD into the new directory:
    - `cd ./ball-physics`
-3. Install dependencies:
+3. Install dependencies (make sure vcpkg is added to PATH):
    - `vcpkg install`
 4. Get the cmake toolchain file path:
    - `vcpkg integrate install`
