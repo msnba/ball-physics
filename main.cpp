@@ -11,18 +11,25 @@
 #include <vector>
 #include <random>
 
-const int WIDTH = 800;
-const int HEIGHT = 600;
-const float ASPECT = (float)WIDTH / (float)HEIGHT;
+int WIDTH = 800;
+int HEIGHT = 600;
+const int FIXED_HEIGHT = HEIGHT;
+float ASPECT = (float)WIDTH / (float)HEIGHT;
+
+float cursorX, cursorY; // in pixel coordinates
+float lastCursorX, lastCursorY;
+bool ballSelected = false;
+bool mousePressed = false;
 
 const char *vertexShaderSource = R"glsl(#version 330 core
 layout (location = 0) in vec3 aPos;
 
-uniform mat4 transform;
+uniform mat4 projection;
+uniform mat4 model;
 
 void main()
 {
-    gl_Position = transform * vec4(aPos, 1.0);
+    gl_Position = projection * model * vec4(aPos, 1.0);
 };)glsl";
 
 const char *fragmentShaderSource = R"glsl(
@@ -38,6 +45,8 @@ float deltaTime = 0.0, lastFrame = 0.0;
 
 GLuint CreateShaderP(const char *vertexSource, const char *fragmentSource);
 void CreateVV(GLuint &VAO, GLuint &VBO, const float *vertices, size_t vertCount);
+
+glm::vec2 ConvertNDC(float x, float y);
 
 void framebuffer_size_callback(GLFWwindow *window, int width, int height);
 
@@ -56,18 +65,18 @@ public:
     float mass;
     float damping;
 
-    Ball(glm::vec3 position, glm::vec3 velocity, float radius) : position(position), velocity(velocity), radius(radius)
+    Ball(glm::vec3 position, glm::vec3 velocity, float radius, float mass) : position(position), velocity(velocity), radius(radius), mass(mass)
     {
         std::vector<float> vertices = GenerateCirc();
         vertCount = vertices.size() / 3;
 
-        mass = 1.0f;
-        damping = 0.7f;
+        // mass = 1.0f;
+        damping = .5f;
 
         CreateVV(VAO, VBO, vertices.data(), vertices.size()); // creates a VAO and VBO for each specific ball
     }
 
-    Ball(glm::vec3 position, glm::vec3 velocity, float radius, glm::vec4 color) : Ball(position, velocity, radius)
+    Ball(glm::vec3 position, glm::vec3 velocity, float radius, float mass, glm::vec4 color) : Ball(position, velocity, radius, mass)
     {
         this->color = color;
     }
@@ -78,7 +87,7 @@ public:
 
         vertices.insert(vertices.end(), {0.0f, 0.0f, 0.0f});
 
-        int quality = 70;
+        int quality = 50;
 
         for (int i = 0; i <= quality; i++)
         {
@@ -112,17 +121,15 @@ public:
     }
     void CheckWallCollision()
     {
-        const float radiusX = radius / ASPECT;
-
         // check for wall clipping and apply transformations
-        if (position.x - radiusX < -1.0f) // LEFT
+        if (position.x - radius < -ASPECT) // LEFT
         {
-            position.x = -1.0f + radiusX;
+            position.x = -ASPECT + radius;
             velocity.x = -velocity.x * damping;
         }
-        if (position.x + radiusX > 1.0f) // RIGHT
+        if (position.x + radius > ASPECT) // RIGHT
         {
-            position.x = 1.0f - radiusX;
+            position.x = ASPECT - radius;
             velocity.x = -velocity.x * damping;
         }
         if (position.y - radius < -1.0f) // BOTTOM
@@ -142,8 +149,8 @@ public:
         if (this == &otherBall) // check mismatch
             return;
 
-        glm::vec2 aPos = glm::vec2(this->position.x * ASPECT, this->position.y);
-        glm::vec2 bPos = glm::vec2(otherBall.position.x * ASPECT, otherBall.position.y);
+        glm::vec2 aPos = glm::vec2(this->position.x, this->position.y);
+        glm::vec2 bPos = glm::vec2(otherBall.position.x, otherBall.position.y);
 
         glm::vec2 delta = aPos - bPos;
         float distance = glm::length(delta);
@@ -167,8 +174,13 @@ public:
         float va = glm::dot(glm::vec2(this->velocity.x * ASPECT, this->velocity.y), normal);         // initial velocity before collision
         float vb = glm::dot(glm::vec2(otherBall.velocity.x * ASPECT, otherBall.velocity.y), normal); // va = velocity a
 
-        float va_f = (va + vb - damping * (va - vb)) * 0.5f; // solve using 1-dim elastic collision equations
-        float vb_f = (va + vb + damping * (va - vb)) * 0.5f; // assumming equal masses, va_f = velocity a final
+        //--NEW EQUATION--
+        float va_f = (va * (this->mass - otherBall.mass) + 2 * otherBall.mass * vb) / (this->mass + otherBall.mass); // solve using 1-dim elastic collision equations assuming unequal masses
+        float vb_f = (vb * (otherBall.mass - this->mass) + 2 * this->mass * va) / (this->mass + otherBall.mass);     // va_f = velocity a final
+
+        //--OLD EQUATION--
+        // float va_f = (va * (this->mass - otherBall.mass) + 2 * otherBall.mass * vb) / (this->mass + otherBall.mass); // solve using 1-dim elastic collision equations assuming unequal masses
+        // float vb_f = (vb * (otherBall.mass - this->mass) + 2 * this->mass * va) / (this->mass + otherBall.mass);     // va_f = velocity a final
 
         glm::vec2 impulseA = (va_f - va) * normal; // change in momentum caused by collision
         glm::vec2 impulseB = (vb_f - vb) * normal; // corrects velocities along collision normal
@@ -179,40 +191,26 @@ public:
 
     void ApplyResistance() // super simple air resistance, feels like the balls are on ice if this isnt applied
     {
-        const float drag = 2.0f;
+        const float drag = 2.5f;
 
-        this->velocity *= (1.0f - drag * deltaTime);
-    }
-
-    glm::vec3 GetPos() const
-    {
-        return this->position;
-    }
-
-private:
-    float calcCorrectionImpulse(float overlap, float stiffness, float damping)
-    {
-        return -(1.0f / deltaTime) * overlap * stiffness - velocity.x * damping; // spring-damper system
-        // this only works with velocity.x i have tried velocity.y it DOES NOT WORK
-        // it simplifies to -velocity.x * damping so i don't know whats up
-        // it is now a feature
+        this->velocity *= (1.0f - drag * deltaTime); // helps make the balls less jittery
     }
 };
 
-std::vector<Ball> balls = {}; // haha
+std::vector<Ball> balls = {};
+Ball *selectedBall = nullptr;
+glm::vec2 dragVelocity = glm::vec2(0.0f);
 
 int main()
 {
     if (!glfwInit())
     {
-        std::cerr << "GLFW failed init!! oh no" << std::endl;
+        std::cerr << "GLFW failed init!!" << std::endl;
         return -1;
     }
-
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);                 // version 3.3
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); // using core means we'll only use/get features we actually need
-    glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
 
 #ifdef __APPLE__
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
@@ -234,20 +232,65 @@ int main()
         return -1;
     }
 
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback); // registering function to call every window resize
+
+    glfwSetWindowSizeCallback(window, [](GLFWwindow *window, int width, int height)
+                              {
+                                  if (height != FIXED_HEIGHT)
+                                      glfwSetWindowSize(window, width, FIXED_HEIGHT); // force back to fixed height
+                              });
+
+    glfwSetCursorPosCallback(window, [](GLFWwindow *window, double x, double y)
+                             {
+                                    lastCursorX = cursorX;
+                                    lastCursorY = cursorY;
+                                    cursorX = (float)x;
+                                    cursorY = (float)y; });
+    glfwSetMouseButtonCallback(window, [](GLFWwindow *win, int button, int action, int mods)
+                               {
+                                  if(button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS){
+                                    mousePressed = true;
+
+                                    glm::vec2 mouseNDC = ConvertNDC(cursorX,cursorY);
+
+                                    for(auto &ball : balls){
+                                        glm::vec2 center(ball.position.x,ball.position.y);
+
+                                        if(glm::distance(mouseNDC,center)<=ball.radius){
+                                            selectedBall = &ball;
+                                            ballSelected = true;
+                                            dragVelocity = glm::vec2(0.0f);
+                                            break;
+                                        }
+                                    }
+                                  }else if(button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE){
+                                    mousePressed = false;
+
+                                    if(ballSelected && selectedBall){
+                                        selectedBall->velocity = glm::vec3(dragVelocity.x,dragVelocity.y,0.0f);
+                                    }
+
+                                    ballSelected = false;
+                                    selectedBall = nullptr;
+                                  } });
+
     GLuint shaderProgram = CreateShaderP(vertexShaderSource, fragmentShaderSource);
+
     int colorLoc = glGetUniformLocation(shaderProgram, "color");
+    int modelLoc = glGetUniformLocation(shaderProgram, "model");
+    int projectionLoc = glGetUniformLocation(shaderProgram, "projection");
 
     glEnable(GL_DEPTH_TEST);
-    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback); // registering function to call every window resize
 
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(0.0, 1.0);
 
-    for (int i = 0; i < 30; i++)
+    for (int i = 0; i < 40; i++)
     {
-        balls.push_back(Ball(glm::vec3(dis(gen) * 0.1f, dis(gen) * 0.1f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 0.1f, glm::vec4(dis(gen), dis(gen), dis(gen), 1.0f)));
+        balls.push_back(Ball(glm::vec3(dis(gen) * 0.1f, dis(gen) * 0.1f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 0.1f, 10.0f, glm::vec4(dis(gen), dis(gen), dis(gen), 1.0f)));
     }
+    balls.push_back(Ball(glm::vec3(dis(gen) * 0.1f, dis(gen) * 0.1f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 0.2f, 10.0f, glm::vec4(dis(gen), dis(gen), dis(gen), 5.0f)));
 
     while (!glfwWindowShouldClose(window)) // main render loop
     {
@@ -261,13 +304,26 @@ int main()
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glUseProgram(shaderProgram);
-        unsigned int transformLoc = glGetUniformLocation(shaderProgram, "transform");
 
+        glm::mat4 projection = glm::ortho(-ASPECT, ASPECT, -1.0f, 1.0f, -1.0f, 1.0f);
+        glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(projection));
+
+        glm::vec2 mouseNDC = ConvertNDC(cursorX, cursorY);
         for (auto &ball : balls)
         {
             ball.accel(0.0f, -9.8f * deltaTime);
             ball.ApplyResistance();
             ball.CheckWallCollision();
+        }
+
+        if (ballSelected && selectedBall != nullptr && mousePressed)
+        {
+            glm::vec2 currentMouseNDC = ConvertNDC(cursorX, cursorY);
+            glm::vec2 lastMouseNDC = ConvertNDC(lastCursorX, lastCursorY);
+
+            selectedBall->position = glm::vec3(currentMouseNDC, 0.0f);
+
+            dragVelocity = (currentMouseNDC - lastMouseNDC) / deltaTime;
         }
 
         for (size_t i = 0; i < balls.size(); i++)
@@ -283,9 +339,10 @@ int main()
             // ball.UpdateVerts();
             ball.UpdatePos();
 
-            glm::mat4 trans = glm::translate(glm::mat4(1.0f), ball.position);
-            trans = glm::scale(trans, glm::vec3(1.0f / ASPECT, 1.0f, 1.0f));
-            glUniformMatrix4fv(transformLoc, 1, GL_FALSE, glm::value_ptr(trans));
+            // std::cout << ball.position.x << " " << ball.position.y << std::endl;
+
+            glm::mat4 model = glm::translate(glm::mat4(1.0f), ball.position);
+            glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
             glUniform4fv(colorLoc, 1, glm::value_ptr(ball.color));
 
             glBindVertexArray(ball.VAO);
@@ -368,7 +425,20 @@ void CreateVV(GLuint &VAO, GLuint &VBO, const float *vertices, size_t vertCount)
     glBindVertexArray(0);
 }
 
+glm::vec2 ConvertNDC(float x, float y) // converts pixel values to ndc
+{
+    return glm::vec2(((2.0f * x) / WIDTH - 1.0f) * ASPECT, -(2.0f * y) / HEIGHT + 1.0f);
+}
+
 void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
     glViewport(0, 0, width, height);
+    WIDTH = width;
+    HEIGHT = height;
+    ASPECT = (float)WIDTH / (float)HEIGHT;
+
+    for (auto &ball : balls)
+    {
+        ball.UpdateVerts();
+    }
 }
