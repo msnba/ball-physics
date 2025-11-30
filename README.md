@@ -1,13 +1,6 @@
 # ball-physics
 
 _An OpenGL physics simulation._
-
-What I plan to do in this project:
-
-- Simulate physics in OpenGl
-- (Hopefully) Get to work with shaders
-- Figure out how to use OpenGl
-
 ### Build Requirements
 
 1. [A C++ Compiler](https://code.visualstudio.com/docs/languages/cpp#_install-a-compiler)
