@@ -25,6 +25,11 @@ _An OpenGL physics simulation._
 6. Build the project:
    - `cmake --build build`
 
+### ⚠️ ISSUES ⚠️
+
+- As of right now, this project will be supported by Windows only, as cross-platform c++ is very hard to pull off. 
+_I got macos working but there were issues prevalent that were exclusively for that operating system._
+
 ### Resources Used
 
 - [2-Dimensional Elastic Collisions without Trigonometry - Chad Berchek](https://www.vobarian.com/collisions/2dcollisions2.pdf)
