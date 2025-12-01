@@ -3,6 +3,9 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+
+#include "Shader.h"
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -13,8 +16,8 @@
 
 int WIDTH = 800;
 int HEIGHT = 600;
-const int FIXED_HEIGHT = HEIGHT;
-float ASPECT = (float)WIDTH / (float)HEIGHT;
+
+float ASPECT = (float)HEIGHT / (float)WIDTH;
 
 float cursorX, cursorY; // in pixel coordinates
 float lastCursorX, lastCursorY;
@@ -43,11 +46,8 @@ void main()
 
 float deltaTime = 0.0, lastFrame = 0.0;
 
-GLuint CreateShaderP(const char *vertexSource, const char *fragmentSource);
 void CreateVV(GLuint &VAO, GLuint &VBO, const float *vertices, size_t vertCount);
-
 glm::vec2 ConvertNDC(float x, float y);
-
 void framebuffer_size_callback(GLFWwindow *window, int width, int height);
 
 class Ball
@@ -57,15 +57,17 @@ public:
     GLuint VAO, VBO;
 
     glm::vec3 position = glm::vec3(0, 0, 0); // placeholder
+    glm::vec3 lastPosition = position;
+
     glm::vec3 velocity = glm::vec3(0, 0, 0);
     glm::vec4 color = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
     size_t vertCount;
 
-    float radius;
+    float radius, originalRadius;
     float mass;
     float damping;
 
-    Ball(glm::vec3 position, glm::vec3 velocity, float radius, float mass) : position(position), velocity(velocity), radius(radius), mass(mass)
+    Ball(glm::vec3 position, glm::vec3 velocity, float radius, float mass) : position(position), velocity(velocity), radius(radius), originalRadius(radius), mass(mass)
     {
         std::vector<float> vertices = GenerateCirc();
         vertCount = vertices.size() / 3;
@@ -102,11 +104,18 @@ public:
 
     void UpdatePos()
     {
+        this->lastPosition = position;
         this->position[0] += this->velocity[0] * deltaTime;
         this->position[1] += this->velocity[1] * deltaTime;
     }
     void UpdateVerts()
     {
+        this->radius = originalRadius * ((float)HEIGHT/600.0f); // fixed height scaling issue by just scaling radius with height
+
+        this->position = glm::vec3(position.x, position.y, position.z);
+
+        // std::cout << WIDTH << " " << HEIGHT << std::endl;
+
         std::vector<float> vertices = GenerateCirc();
         vertCount = vertices.size() / 3;
 
@@ -174,13 +183,8 @@ public:
         float va = glm::dot(glm::vec2(this->velocity.x * ASPECT, this->velocity.y), normal);         // initial velocity before collision
         float vb = glm::dot(glm::vec2(otherBall.velocity.x * ASPECT, otherBall.velocity.y), normal); // va = velocity a
 
-        //--NEW EQUATION--
         float va_f = (va * (this->mass - otherBall.mass) + 2 * otherBall.mass * vb) / (this->mass + otherBall.mass); // solve using 1-dim elastic collision equations assuming unequal masses
         float vb_f = (vb * (otherBall.mass - this->mass) + 2 * this->mass * va) / (this->mass + otherBall.mass);     // va_f = velocity a final
-
-        //--OLD EQUATION--
-        // float va_f = (va * (this->mass - otherBall.mass) + 2 * otherBall.mass * vb) / (this->mass + otherBall.mass); // solve using 1-dim elastic collision equations assuming unequal masses
-        // float vb_f = (vb * (otherBall.mass - this->mass) + 2 * this->mass * va) / (this->mass + otherBall.mass);     // va_f = velocity a final
 
         glm::vec2 impulseA = (va_f - va) * normal; // change in momentum caused by collision
         glm::vec2 impulseB = (vb_f - vb) * normal; // corrects velocities along collision normal
@@ -200,6 +204,19 @@ public:
 std::vector<Ball> balls = {};
 Ball *selectedBall = nullptr;
 glm::vec2 dragVelocity = glm::vec2(0.0f);
+
+void framebuffer_size_callback(GLFWwindow *window, int width, int height)
+{
+    glViewport(0, 0, width, height);
+    WIDTH = width;
+    HEIGHT = height;
+    ASPECT = (float)WIDTH / (float)HEIGHT;
+
+    for (auto &ball : balls)
+    {
+        ball.UpdateVerts();
+    }
+}
 
 int main()
 {
@@ -236,8 +253,8 @@ int main()
 
     glfwSetWindowSizeCallback(window, [](GLFWwindow *window, int width, int height)
                               {
-                                  if (height != FIXED_HEIGHT)
-                                      glfwSetWindowSize(window, width, FIXED_HEIGHT); // force back to fixed height
+                                  //   if (height != FIXED_HEIGHT)
+                                  //       glfwSetWindowSize(window, width, FIXED_HEIGHT); // force back to fixed height
                               });
 
     glfwSetCursorPosCallback(window, [](GLFWwindow *window, double x, double y)
@@ -263,6 +280,9 @@ int main()
                                             break;
                                         }
                                     }
+                                    if(selectedBall){
+                                        // std::cout<<selectedBall->position.x<<std::endl;
+                                    }
                                   }else if(button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE){
                                     mousePressed = false;
 
@@ -274,23 +294,20 @@ int main()
                                     selectedBall = nullptr;
                                   } });
 
-    GLuint shaderProgram = CreateShaderP(vertexShaderSource, fragmentShaderSource);
-
-    int colorLoc = glGetUniformLocation(shaderProgram, "color");
-    int modelLoc = glGetUniformLocation(shaderProgram, "model");
-    int projectionLoc = glGetUniformLocation(shaderProgram, "projection");
-
-    glEnable(GL_DEPTH_TEST);
+    Shader shader("basic.vert", "basic.frag"); //shader config
+    shader.use(); 
 
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(0.0, 1.0);
 
-    for (int i = 0; i < 40; i++)
+    for (int i = 0; i < 20; i++)
     {
-        balls.push_back(Ball(glm::vec3(dis(gen) * 0.1f, dis(gen) * 0.1f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 0.1f, 10.0f, glm::vec4(dis(gen), dis(gen), dis(gen), 1.0f)));
+        balls.push_back(Ball(glm::vec3(dis(gen) * 0.1f, dis(gen) * 0.1f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 0.05f, 10.0f, glm::vec4(dis(gen), dis(gen), dis(gen), 1.0f)));
     }
     balls.push_back(Ball(glm::vec3(dis(gen) * 0.1f, dis(gen) * 0.1f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), 0.2f, 10.0f, glm::vec4(dis(gen), dis(gen), dis(gen), 5.0f)));
+
+    glEnable(GL_DEPTH_TEST);
 
     while (!glfwWindowShouldClose(window)) // main render loop
     {
@@ -303,12 +320,11 @@ int main()
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        glUseProgram(shaderProgram);
+        shader.use();
 
         glm::mat4 projection = glm::ortho(-ASPECT, ASPECT, -1.0f, 1.0f, -1.0f, 1.0f);
-        glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(projection));
+        shader.setMat4("projection", glm::value_ptr(projection));
 
-        glm::vec2 mouseNDC = ConvertNDC(cursorX, cursorY);
         for (auto &ball : balls)
         {
             ball.accel(0.0f, -9.8f * deltaTime);
@@ -336,17 +352,14 @@ int main()
 
         for (auto &ball : balls)
         {
-            // ball.UpdateVerts();
             ball.UpdatePos();
 
-            // std::cout << ball.position.x << " " << ball.position.y << std::endl;
-
             glm::mat4 model = glm::translate(glm::mat4(1.0f), ball.position);
-            glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-            glUniform4fv(colorLoc, 1, glm::value_ptr(ball.color));
+            shader.setMat4("model",glm::value_ptr(model));
+            shader.setVec4("color",glm::value_ptr(ball.color));
 
             glBindVertexArray(ball.VAO);
-            glDrawArrays(GL_TRIANGLE_FAN, 0, ball.vertCount); // using triangle fan method of circle drawing
+            glDrawArrays(GL_TRIANGLE_FAN, 0, (GLsizei)ball.vertCount); // using triangle fan method of circle drawing
         }
 
         glfwSwapBuffers(window); // swap frame buffers every refresh, using double buffering
@@ -359,55 +372,8 @@ int main()
         glDeleteBuffers(1, &ball.VBO);
     }
 
-    glDeleteProgram(shaderProgram);
     glfwTerminate();
     return 0;
-}
-
-GLuint CreateShaderP(const char *vertexSource, const char *fragmentSource)
-{
-    GLuint vShader = glCreateShader(GL_VERTEX_SHADER); // vertex shader
-    glShaderSource(vShader, 1, &vertexSource, nullptr);
-    glCompileShader(vShader);
-
-    GLint success;
-    glGetShaderiv(vShader, GL_COMPILE_STATUS, &success);
-    if (!success)
-    {
-        char infoLog[512];
-        glGetShaderInfoLog(vShader, 512, nullptr, infoLog);
-        std::cerr << "V Shader compilation failed: " << infoLog << std::endl;
-    }
-
-    GLuint fShader = glCreateShader(GL_FRAGMENT_SHADER); // fragment shader
-    glShaderSource(fShader, 1, &fragmentSource, nullptr);
-    glCompileShader(fShader);
-
-    glGetShaderiv(fShader, GL_COMPILE_STATUS, &success);
-    if (!success)
-    {
-        char infoLog[512];
-        glGetShaderInfoLog(fShader, 512, nullptr, infoLog);
-        std::cerr << "F Shader compilation failed: " << infoLog << std::endl;
-    }
-
-    GLuint shaderProgram = glCreateProgram(); // creating shader program
-    glAttachShader(shaderProgram, vShader);
-    glAttachShader(shaderProgram, fShader);
-    glLinkProgram(shaderProgram);
-
-    glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
-    if (!success)
-    {
-        char infoLog[512];
-        glGetProgramInfoLog(shaderProgram, 512, nullptr, infoLog);
-        std::cerr << "Shader link failed: " << infoLog << std::endl;
-    }
-
-    glDeleteShader(vShader);
-    glDeleteShader(fShader);
-
-    return shaderProgram;
 }
 
 void CreateVV(GLuint &VAO, GLuint &VBO, const float *vertices, size_t vertCount)
@@ -428,17 +394,4 @@ void CreateVV(GLuint &VAO, GLuint &VBO, const float *vertices, size_t vertCount)
 glm::vec2 ConvertNDC(float x, float y) // converts pixel values to ndc
 {
     return glm::vec2(((2.0f * x) / WIDTH - 1.0f) * ASPECT, -(2.0f * y) / HEIGHT + 1.0f);
-}
-
-void framebuffer_size_callback(GLFWwindow *window, int width, int height)
-{
-    glViewport(0, 0, width, height);
-    WIDTH = width;
-    HEIGHT = height;
-    ASPECT = (float)WIDTH / (float)HEIGHT;
-
-    for (auto &ball : balls)
-    {
-        ball.UpdateVerts();
-    }
 }

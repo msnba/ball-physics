@@ -10,6 +10,7 @@ find_package(glad CONFIG REQUIRED)
 
 set(SOURCES
     main.cpp
+    shader.cpp
 )
 
 add_executable(BallPhysics ${SOURCES})
@@ -19,6 +20,22 @@ target_link_libraries(BallPhysics PRIVATE
     glm::glm
     glad::glad
 )
+
+# Shader Configuration
+
+set(SHADER_FILES
+    basic.vert
+    basic.frag
+)
+
+foreach(SHADER ${SHADER_FILES})
+    add_custom_command(
+        TARGET BallPhysics POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/${SHADER}"
+            "$<TARGET_FILE_DIR:BallPhysics>/${SHADER}"
+    )
+endforeach()
 
 # Platform Specifics
 if(APPLE)
