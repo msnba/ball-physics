@@ -24,26 +24,6 @@ float lastCursorX, lastCursorY;
 bool ballSelected = false;
 bool mousePressed = false;
 
-const char *vertexShaderSource = R"glsl(#version 330 core
-layout (location = 0) in vec3 aPos;
-
-uniform mat4 projection;
-uniform mat4 model;
-
-void main()
-{
-    gl_Position = projection * model * vec4(aPos, 1.0);
-};)glsl";
-
-const char *fragmentShaderSource = R"glsl(
-#version 330 core
-out vec4 FragColor;
-uniform vec4 color;
-void main()
-{
-    FragColor = color;
-};)glsl";
-
 float deltaTime = 0.0, lastFrame = 0.0;
 
 void CreateVV(GLuint &VAO, GLuint &VBO, const float *vertices, size_t vertCount);
